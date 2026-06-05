@@ -1,0 +1,7 @@
+data/chats/*.json
+data/chats/*.tmp
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.env

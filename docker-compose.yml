@@ -7,8 +7,12 @@ services:
       ADSB_JSON_URL: ${ADSB_JSON_URL:-}
       ADSB_RECEIVER_LAT: ${ADSB_RECEIVER_LAT:-}
       ADSB_RECEIVER_LON: ${ADSB_RECEIVER_LON:-}
+      CHAT_DATA_DIR: /app/data/chats
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
     ports:
       - "8000:8000"
     restart: unless-stopped

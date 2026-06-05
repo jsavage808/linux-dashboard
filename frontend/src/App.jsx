@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Activity,
   Bot,
+  Copy,
   Cpu,
   Gauge,
   HardDrive,
@@ -11,16 +12,21 @@ import {
   Radio,
   Router,
   Satellite,
+  Send,
   Settings,
   TerminalSquare,
+  Trash2,
   Wifi,
 } from "lucide-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import "leaflet/dist/leaflet.css";
 import "@xterm/xterm/css/xterm.css";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 
 const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`;
 const API_BASE = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE;
@@ -203,6 +209,407 @@ function PlaceholderPage({ title, icon: Icon, detail }) {
   );
 }
 
+function copyText(text) {
+  navigator.clipboard?.writeText(text).catch(() => {});
+}
+
+function MarkdownMessage({ content }) {
+  function extractText(node) {
+    if (typeof node === "string") return node;
+    if (Array.isArray(node)) return node.map(extractText).join("");
+    if (node?.props?.children) return extractText(node.props.children);
+    return "";
+  }
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkBreaks]}
+      components={{
+        a({ children, href }) {
+          return (
+            <a href={href} target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          );
+        },
+        code({ className, children, ...props }) {
+          return (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          );
+        },
+        pre({ children }) {
+          const codeText = extractText(children).replace(/\n$/, "");
+          return (
+            <div className="code-block">
+              <button type="button" onClick={() => copyText(codeText)} aria-label="Copy code block">
+                <Copy size={14} />
+                Copy
+              </button>
+              <pre>{children}</pre>
+            </div>
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function AiChatPage() {
+  const [models, setModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState(
+    () => localStorage.getItem("linux-dashboard-chat-model") || ""
+  );
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(() => localStorage.getItem("linux-dashboard-active-chat") || "");
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [streaming, setStreaming] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadModels() {
+      try {
+        const response = await fetch(`${API_BASE}/api/models`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `API returned ${response.status}`);
+        if (ignore) return;
+
+        const modelNames = data.models.map((model) => model.name);
+        setModels(data.models);
+        setSelectedModel((current) => {
+          if (current && modelNames.includes(current)) return current;
+          return data.default_model || "";
+        });
+        setError("");
+      } catch (err) {
+        if (!ignore) setError(err.message || "Backend connection failed.");
+      } finally {
+        if (!ignore) setLoadingModels(false);
+      }
+    }
+
+    loadModels();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadChats() {
+      try {
+        const response = await fetch(`${API_BASE}/api/chats`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `API returned ${response.status}`);
+        if (ignore) return;
+        setChats(data.chats);
+
+        const storedChatExists = data.chats.some((chat) => chat.id === activeChatId);
+        const chatToOpen = storedChatExists ? activeChatId : data.chats[0]?.id;
+        if (chatToOpen) {
+          await openChat(chatToOpen, { preserveErrors: true });
+        } else {
+          setActiveChatId("");
+          setMessages([]);
+        }
+      } catch (err) {
+        if (!ignore) setError(err.message || "Backend connection failed.");
+      } finally {
+        if (!ignore) setLoadingChats(false);
+      }
+    }
+
+    loadChats();
+    return () => {
+      ignore = true;
+    };
+    // Run once on mount; openChat reads fresh data from the backend.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
+
+  useEffect(() => {
+    if (selectedModel) {
+      localStorage.setItem("linux-dashboard-chat-model", selectedModel);
+    }
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (activeChatId) {
+      localStorage.setItem("linux-dashboard-active-chat", activeChatId);
+    } else {
+      localStorage.removeItem("linux-dashboard-active-chat");
+    }
+  }, [activeChatId]);
+
+  async function refreshChats() {
+    const response = await fetch(`${API_BASE}/api/chats`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `API returned ${response.status}`);
+    setChats(data.chats);
+    return data.chats;
+  }
+
+  async function openChat(chatId, options = {}) {
+    if (streaming) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/chats/${chatId}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `API returned ${response.status}`);
+      setActiveChatId(data.id);
+      setSelectedModel(data.model || selectedModel);
+      setMessages(data.messages || []);
+      setDraft("");
+      if (!options.preserveErrors) setError("");
+    } catch (err) {
+      setError(err.message || "Backend connection failed.");
+    }
+  }
+
+  async function saveChat(nextMessages, model = selectedModel, chatId = activeChatId) {
+    const method = chatId ? "PUT" : "POST";
+    const url = chatId ? `${API_BASE}/api/chats/${chatId}` : `${API_BASE}/api/chats`;
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: nextMessages }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `Save failed with ${response.status}`);
+    setActiveChatId(data.id);
+    setSelectedModel(data.model || model);
+    await refreshChats();
+    return data;
+  }
+
+  async function sendMessage() {
+    const content = draft.trim();
+    if (!content || streaming) return;
+    if (!selectedModel) {
+      setError("No Ollama model is available. Pull a model first, such as qwen3:14b.");
+      return;
+    }
+
+    setDraft("");
+    setError("");
+    setStreaming(true);
+
+    const nextMessages = [...messages, { role: "user", content }];
+    setMessages([...nextMessages, { role: "assistant", content: "" }]);
+    let assistantContent = "";
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: selectedModel, messages: nextMessages }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Chat request failed with ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        assistantContent += chunk;
+        setMessages((current) => {
+          const updated = [...current];
+          const last = updated[updated.length - 1];
+          updated[updated.length - 1] = { ...last, content: `${last.content}${chunk}` };
+          return updated;
+        });
+      }
+
+      const finalMessages = [...nextMessages, { role: "assistant", content: assistantContent }];
+      setMessages(finalMessages);
+      await saveChat(finalMessages, selectedModel);
+    } catch (err) {
+      setError(err.message || "Backend connection failed.");
+      setMessages((current) => {
+        const updated = [...current];
+        if (updated[updated.length - 1]?.role === "assistant" && !updated[updated.length - 1].content) {
+          updated.pop();
+        }
+        return updated;
+      });
+    } finally {
+      setStreaming(false);
+    }
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function newChat() {
+    if (streaming) return;
+    setActiveChatId("");
+    setMessages([]);
+    setDraft("");
+    setError("");
+  }
+
+  async function deleteChat() {
+    if (!activeChatId || streaming) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/chats/${activeChatId}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `Delete failed with ${response.status}`);
+      const remainingChats = await refreshChats();
+      const nextChatId = remainingChats[0]?.id;
+      if (nextChatId) {
+        await openChat(nextChatId);
+      } else {
+        setActiveChatId("");
+        setMessages([]);
+      }
+      setError("");
+    } catch (err) {
+      setError(err.message || "Backend connection failed.");
+    }
+  }
+
+  const activeChat = chats.find((chat) => chat.id === activeChatId);
+
+  return (
+    <section className="chat-workspace">
+      <aside className="chat-sidebar">
+        <button type="button" className="secondary-button new-chat-button" onClick={newChat} disabled={streaming}>
+          New Chat
+        </button>
+        <div className="saved-chat-list">
+          {loadingChats ? (
+            <span className="saved-chat-empty">Loading chats...</span>
+          ) : chats.length === 0 ? (
+            <span className="saved-chat-empty">No saved chats yet</span>
+          ) : (
+            chats.map((chat) => (
+              <button
+                type="button"
+                key={chat.id}
+                className={chat.id === activeChatId ? "saved-chat active" : "saved-chat"}
+                onClick={() => openChat(chat.id)}
+                disabled={streaming}
+              >
+                <strong>{chat.title}</strong>
+                <span>{chat.model || "No model"} - {chat.message_count} messages</span>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+
+      <div className="chat-panel">
+        <div className="chat-toolbar">
+          <div>
+            <span className="eyebrow">Ollama</span>
+            <h1>{activeChat?.title || "AI Chat"}</h1>
+          </div>
+          <div className="chat-controls">
+            <select
+              value={selectedModel}
+              onChange={(event) => setSelectedModel(event.target.value)}
+              disabled={loadingModels || streaming}
+            >
+              {models.length === 0 ? (
+                <option value="">No models found</option>
+              ) : (
+                models.map((model) => (
+                  <option key={model.name} value={model.name}>
+                    {model.name}
+                  </option>
+                ))
+              )}
+            </select>
+            <button type="button" className="secondary-button" onClick={deleteChat} disabled={!activeChatId || streaming}>
+              <Trash2 size={16} />
+              Delete Chat
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="chat-error">
+            <AlertTriangle size={17} />
+            {error}
+          </div>
+        )}
+
+        <div className="chat-messages">
+          {messages.length === 0 ? (
+            <div className="empty-chat">
+              <Bot size={34} />
+              <h2>Local Ollama chat</h2>
+              <p>Ask a question. Completed exchanges are saved to disk on the backend.</p>
+            </div>
+          ) : (
+            messages.map((message, index) => (
+              <article key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
+                <div className="message-header">
+                  <span>{message.role === "user" ? "You" : selectedModel || "Assistant"}</span>
+                  {message.role === "assistant" && message.content && (
+                    <button type="button" onClick={() => copyText(message.content)} aria-label="Copy assistant message">
+                      <Copy size={14} />
+                      Copy
+                    </button>
+                  )}
+                </div>
+                <div className="markdown-body">
+                  {message.content ? <MarkdownMessage content={message.content} /> : <span className="stream-caret">Streaming...</span>}
+                </div>
+              </article>
+            ))
+          )}
+          {streaming && (
+            <div className="streaming-indicator">
+              <span />
+              Ollama is responding
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="chat-composer">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Send a message to Ollama..."
+            rows={3}
+            disabled={streaming}
+          />
+          <button type="button" onClick={sendMessage} disabled={streaming || !draft.trim()}>
+            <Send size={18} />
+            Send
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function formatValue(value, suffix = "") {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "number") return `${Math.round(value).toLocaleString()}${suffix}`;
@@ -256,7 +663,7 @@ function AircraftMap({ aircraft, receiver }) {
       const marker = L.marker([item.lat, item.lon], {
         icon: L.divIcon({
           className: "aircraft-marker",
-          html: `<span style="transform: rotate(${heading}deg)">▲</span>`,
+          html: `<span style="transform: rotate(${heading}deg)">^</span>`,
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         }),
@@ -506,7 +913,7 @@ function App() {
 
   const pages = {
     dashboard: <DashboardPage />,
-    chat: <PlaceholderPage title="AI Chat" icon={Bot} detail="Chat interface shell reserved for future model integration." />,
+    chat: <AiChatPage />,
     terminal: <TerminalPage />,
     adsb: <AdsbPage />,
     vuhf: <PlaceholderPage title="V/UHF Monitor" icon={Radio} detail="Placeholder for VHF and UHF monitoring workflows." />,

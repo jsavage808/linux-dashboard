@@ -9,6 +9,7 @@ A full-stack Linux dashboard web app with a FastAPI backend and a React + Tailwi
 - System API endpoints under `/api/system`
 - Browser terminal using xterm.js and a FastAPI WebSocket at `/ws/terminal`
 - ADS-B tracker table and Leaflet map reading local readsb/dump1090 JSON
+- Ollama AI Chat with streaming Markdown responses and disk-backed chat history
 - Dark tactical operations UI
 - Docker Compose setup for local Ubuntu deployment
 - Placeholder page for the V/UHF workflow
@@ -21,12 +22,17 @@ linux-dashboard/
     app/
       main.py
       routes/adsb.py
+      routes/ai.py
       routes/system.py
       routes/terminal.py
       services/adsb.py
+      services/chat_store.py
+      services/ollama.py
       services/system_stats.py
     Dockerfile
     requirements.txt
+  data/
+    chats/
   frontend/
     src/
       App.jsx
@@ -89,6 +95,116 @@ The ADS-B endpoint is available at:
 ```text
 http://localhost:8000/api/adsb/aircraft
 ```
+
+The Ollama model and chat endpoints are available at:
+
+```text
+http://localhost:8000/api/models
+http://localhost:8000/api/chat
+http://localhost:8000/api/chats
+```
+
+## Ollama Setup
+
+Install Ollama on the Linux host:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Pull the preferred Qwen model:
+
+```bash
+ollama pull qwen3:14b
+```
+
+Optional smaller/larger Qwen models:
+
+```bash
+ollama pull qwen3:8b
+ollama pull qwen3:32b
+```
+
+Start Ollama. For Docker Compose, Ollama must listen beyond only `localhost` so the backend container can reach it:
+
+```bash
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+If Ollama runs as a systemd service, configure the service with:
+
+```bash
+sudo systemctl edit ollama
+```
+
+Add:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+Then restart it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+Run the dashboard:
+
+```bash
+docker compose up --build
+```
+
+By default, Docker Compose sets:
+
+```bash
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+For non-Docker backend development, the backend defaults to:
+
+```text
+http://localhost:11434
+```
+
+## Chat Storage
+
+AI Chat conversations are saved on disk by the backend. Docker Compose mounts the project data directory into the backend container:
+
+```text
+./data:/app/data
+```
+
+Each saved conversation is stored as a JSON file in:
+
+```text
+data/chats/
+```
+
+Each chat file includes:
+
+```json
+{
+  "id": "uuid",
+  "title": "First user message title",
+  "model": "qwen3:14b",
+  "created_at": "timestamp",
+  "updated_at": "timestamp",
+  "messages": []
+}
+```
+
+Chat filenames use UUIDs, not chat titles. The first title is generated from the first user message and limited to 40 characters.
+
+Saved chat JSON files are ignored by git:
+
+```text
+data/chats/*.json
+```
+
+The frontend may remember the selected model and active chat id in browser storage, but the actual conversation history lives on disk.
 
 ## ADS-B Setup
 

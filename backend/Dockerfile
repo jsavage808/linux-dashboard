@@ -10,7 +10,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-RUN useradd --create-home --shell /bin/bash appuser
+RUN useradd --uid 1000 --create-home --shell /bin/bash appuser \
+    && mkdir -p /app/data/chats \
+    && chown -R appuser:appuser /app/data
 USER appuser
 
 EXPOSE 8000
