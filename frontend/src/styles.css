@@ -265,6 +265,102 @@ nav {
   color: #fecaca;
 }
 
+.adsb-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.setup-warning {
+  display: flex;
+  gap: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.34);
+  background: rgba(113, 63, 18, 0.24);
+  padding: 14px 16px;
+  color: #fde68a;
+}
+
+.setup-warning p {
+  margin: 5px 0 0;
+  color: #fef3c7;
+}
+
+.adsb-map-panel,
+.adsb-table-panel {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 19, 17, 0.78);
+  padding: 18px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.26);
+}
+
+.adsb-map {
+  height: min(52vh, 520px);
+  min-height: 340px;
+  margin-top: 14px;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  background: #07110f;
+}
+
+.adsb-map .leaflet-tile-pane {
+  filter: saturate(0.7) brightness(0.62) contrast(1.15);
+}
+
+.adsb-map .leaflet-control-zoom a {
+  border-color: rgba(148, 163, 184, 0.3);
+  background: #081311;
+  color: #e7f7ef;
+}
+
+.aircraft-marker {
+  display: grid;
+  place-items: center;
+  color: #a3e635;
+  font-size: 1.25rem;
+  text-shadow: 0 0 10px rgba(163, 230, 53, 0.8);
+}
+
+.aircraft-marker span {
+  display: block;
+}
+
+.table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.aircraft-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.aircraft-table th,
+.aircraft-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  padding: 12px 10px;
+  text-align: left;
+}
+
+.aircraft-table th {
+  color: #5eead4;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.aircraft-table td {
+  color: #dbeafe;
+}
+
+.aircraft-table td strong,
+.aircraft-table td span {
+  display: block;
+}
+
+.aircraft-table td span {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
 .terminal-panel {
   display: grid;
   grid-template-rows: auto minmax(420px, calc(100vh - 170px));

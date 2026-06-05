@@ -8,9 +8,10 @@ A full-stack Linux dashboard web app with a FastAPI backend and a React + Tailwi
 - Sidebar navigation for Dashboard, AI Chat, Terminal, ADS-B Tracker, V/UHF Monitor, and Settings
 - System API endpoints under `/api/system`
 - Browser terminal using xterm.js and a FastAPI WebSocket at `/ws/terminal`
+- ADS-B tracker table and Leaflet map reading local readsb/dump1090 JSON
 - Dark tactical operations UI
 - Docker Compose setup for local Ubuntu deployment
-- Placeholder pages for ADS-B and V/UHF workflows
+- Placeholder page for the V/UHF workflow
 
 ## Project Structure
 
@@ -19,8 +20,10 @@ linux-dashboard/
   backend/
     app/
       main.py
+      routes/adsb.py
       routes/system.py
       routes/terminal.py
+      services/adsb.py
       services/system_stats.py
     Dockerfile
     requirements.txt
@@ -81,6 +84,32 @@ The terminal WebSocket is available at:
 ws://localhost:8000/ws/terminal
 ```
 
+The ADS-B endpoint is available at:
+
+```text
+http://localhost:8000/api/adsb/aircraft
+```
+
+## ADS-B Setup
+
+The backend tries common local readsb/dump1090 URLs through Docker's host gateway:
+
+```text
+http://host.docker.internal:8080/data/aircraft.json
+http://host.docker.internal:8080/dump1090-fa/data/aircraft.json
+http://host.docker.internal:8080/tar1090/data/aircraft.json
+```
+
+If your receiver exposes JSON somewhere else, create a `.env` file beside `docker-compose.yml`:
+
+```bash
+ADSB_JSON_URL=http://host.docker.internal:8080/data/aircraft.json
+ADSB_RECEIVER_LAT=35.1234
+ADSB_RECEIVER_LON=-97.1234
+```
+
+`ADSB_RECEIVER_LAT` and `ADSB_RECEIVER_LON` are used to calculate aircraft distance in nautical miles when aircraft latitude and longitude are present.
+
 ## Local Development Without Docker
 
 Backend:
@@ -103,7 +132,7 @@ npm run dev
 
 ## Notes
 
-- The ADS-B Tracker and V/UHF Monitor pages are placeholders.
+- The V/UHF Monitor page is still a placeholder.
 - Docker containers report stats from inside their runtime environment. For direct host metrics, run the backend on the host or add host mounts and permissions appropriate for your deployment.
 - Security warning: the browser terminal is an interactive shell. Do not expose it publicly without authentication, authorization, HTTPS, and strict network controls.
 - The backend Docker image creates and runs as the non-root `appuser`; the terminal shell inherits that unprivileged user.

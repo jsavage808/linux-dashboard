@@ -3,6 +3,12 @@ services:
     build:
       context: ./backend
     container_name: linux-dashboard-backend
+    environment:
+      ADSB_JSON_URL: ${ADSB_JSON_URL:-}
+      ADSB_RECEIVER_LAT: ${ADSB_RECEIVER_LAT:-}
+      ADSB_RECEIVER_LON: ${ADSB_RECEIVER_LON:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     restart: unless-stopped

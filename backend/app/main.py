@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routes.adsb import router as adsb_router
 from app.routes.system import router as system_router
 from app.routes.terminal import router as terminal_router
 
@@ -19,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(adsb_router, prefix="/api/adsb", tags=["adsb"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(terminal_router, tags=["terminal"])
 

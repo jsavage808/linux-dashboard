@@ -6,6 +6,8 @@ import {
   Gauge,
   HardDrive,
   MemoryStick,
+  MapPin,
+  Plane,
   Radio,
   Router,
   Satellite,
@@ -15,7 +17,9 @@ import {
 } from "lucide-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
+import "leaflet/dist/leaflet.css";
 import "@xterm/xterm/css/xterm.css";
 
 const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`;
@@ -199,6 +203,200 @@ function PlaceholderPage({ title, icon: Icon, detail }) {
   );
 }
 
+function formatValue(value, suffix = "") {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return `${Math.round(value).toLocaleString()}${suffix}`;
+  return `${value}${suffix}`;
+}
+
+function AircraftMap({ aircraft, receiver }) {
+  const mapRef = useRef(null);
+  const mapNodeRef = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapNodeRef.current || mapRef.current) return undefined;
+
+    mapRef.current = L.map(mapNodeRef.current, {
+      attributionControl: false,
+      zoomControl: true,
+    }).setView([39.8283, -98.5795], 4);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 12,
+      attribution: "OpenStreetMap",
+    }).addTo(mapRef.current);
+    layerRef.current = L.layerGroup().addTo(mapRef.current);
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !layerRef.current) return;
+
+    layerRef.current.clearLayers();
+    const positionedAircraft = aircraft.filter((item) => item.lat !== null && item.lon !== null);
+
+    if (receiver) {
+      L.circleMarker([receiver.lat, receiver.lon], {
+        radius: 6,
+        color: "#a3e635",
+        fillColor: "#a3e635",
+        fillOpacity: 0.85,
+      })
+        .bindTooltip("Receiver")
+        .addTo(layerRef.current);
+    }
+
+    positionedAircraft.forEach((item) => {
+      const heading = Number(item.heading) || 0;
+      const marker = L.marker([item.lat, item.lon], {
+        icon: L.divIcon({
+          className: "aircraft-marker",
+          html: `<span style="transform: rotate(${heading}deg)">▲</span>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        }),
+      }).bindTooltip(`${item.callsign} ${formatValue(item.altitude, " ft")}`);
+      marker.addTo(layerRef.current);
+    });
+
+    const boundsPoints = [
+      ...positionedAircraft.map((item) => [item.lat, item.lon]),
+      ...(receiver ? [[receiver.lat, receiver.lon]] : []),
+    ];
+
+    if (boundsPoints.length > 1) {
+      mapRef.current.fitBounds(boundsPoints, { padding: [28, 28], maxZoom: 9 });
+    } else if (boundsPoints.length === 1) {
+      mapRef.current.setView(boundsPoints[0], 8);
+    }
+  }, [aircraft, receiver]);
+
+  return <div ref={mapNodeRef} className="adsb-map" />;
+}
+
+function AdsbPage() {
+  const [snapshot, setSnapshot] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadAircraft() {
+      try {
+        const response = await fetch(`${API_BASE}/api/adsb/aircraft`);
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+        if (!ignore) {
+          setSnapshot(data);
+          setError("");
+        }
+      } catch (err) {
+        if (!ignore) setError(err.message);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    loadAircraft();
+    const interval = window.setInterval(loadAircraft, 5000);
+    return () => {
+      ignore = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const aircraft = snapshot?.aircraft ?? [];
+  const positionedCount = aircraft.filter((item) => item.lat !== null && item.lon !== null).length;
+
+  if (loading) {
+    return <div className="panel">Scanning for ADS-B feed...</div>;
+  }
+
+  return (
+    <div className="adsb-layout">
+      {(error || !snapshot?.service_available) && (
+        <section className="setup-warning">
+          <AlertTriangle size={19} />
+          <div>
+            <strong>ADS-B service not detected</strong>
+            <p>
+              Start readsb or dump1090 and expose an aircraft JSON endpoint, or set
+              {" "}ADSB_JSON_URL in Docker Compose.
+            </p>
+            {error && <p>{error}</p>}
+          </div>
+        </section>
+      )}
+
+      <section className="command-strip">
+        <div>
+          <p className="eyebrow">ADS-B Feed</p>
+          <h1>{snapshot?.service_available ? `${aircraft.length} Aircraft` : "Awaiting Receiver"}</h1>
+          <span>{snapshot?.source ?? "No readsb/dump1090 endpoint connected"}</span>
+        </div>
+        <div className="status-pill">
+          <Plane size={16} />
+          {positionedCount} mapped
+        </div>
+      </section>
+
+      <section className="adsb-map-panel">
+        <div className="section-title">
+          <MapPin size={19} />
+          Aircraft Positions
+        </div>
+        <AircraftMap aircraft={aircraft} receiver={snapshot?.receiver} />
+      </section>
+
+      <section className="adsb-table-panel">
+        <div className="section-title">
+          <Satellite size={19} />
+          Aircraft Table
+        </div>
+        <div className="table-wrap">
+          <table className="aircraft-table">
+            <thead>
+              <tr>
+                <th>Callsign</th>
+                <th>Altitude</th>
+                <th>Speed</th>
+                <th>Heading</th>
+                <th>Distance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aircraft.length === 0 ? (
+                <tr>
+                  <td colSpan="5">No aircraft currently available.</td>
+                </tr>
+              ) : (
+                aircraft.map((item) => (
+                  <tr key={item.hex || `${item.callsign}-${item.seen}`}>
+                    <td>
+                      <strong>{item.callsign}</strong>
+                      <span>{item.hex ?? "No hex"}</span>
+                    </td>
+                    <td>{formatValue(item.altitude, " ft")}</td>
+                    <td>{formatValue(item.speed, " kt")}</td>
+                    <td>{formatValue(item.heading, " deg")}</td>
+                    <td>{item.distance_nm === null ? "-" : `${item.distance_nm} nm`}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function TerminalPage() {
   const terminalRef = useRef(null);
   const [connected, setConnected] = useState(false);
@@ -310,7 +508,7 @@ function App() {
     dashboard: <DashboardPage />,
     chat: <PlaceholderPage title="AI Chat" icon={Bot} detail="Chat interface shell reserved for future model integration." />,
     terminal: <TerminalPage />,
-    adsb: <PlaceholderPage title="ADS-B Tracker" icon={Satellite} detail="Placeholder for aircraft tracking, receivers, and map overlays." />,
+    adsb: <AdsbPage />,
     vuhf: <PlaceholderPage title="V/UHF Monitor" icon={Radio} detail="Placeholder for VHF and UHF monitoring workflows." />,
     settings: <PlaceholderPage title="Settings" icon={Settings} detail="Configuration controls for refresh cadence, node labels, and integrations." />,
   };
