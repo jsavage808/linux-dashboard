@@ -7,6 +7,7 @@ A full-stack Linux dashboard web app with a FastAPI backend and a React + Tailwi
 - Dashboard metrics for CPU, RAM, disk, uptime, and network traffic
 - Sidebar navigation for Dashboard, AI Chat, Terminal, ADS-B Tracker, V/UHF Monitor, and Settings
 - System API endpoints under `/api/system`
+- Browser terminal using xterm.js and a FastAPI WebSocket at `/ws/terminal`
 - Dark tactical operations UI
 - Docker Compose setup for local Ubuntu deployment
 - Placeholder pages for ADS-B and V/UHF workflows
@@ -19,6 +20,7 @@ linux-dashboard/
     app/
       main.py
       routes/system.py
+      routes/terminal.py
       services/system_stats.py
     Dockerfile
     requirements.txt
@@ -73,6 +75,12 @@ The backend API will be available at:
 http://localhost:8000/api/system/stats
 ```
 
+The terminal WebSocket is available at:
+
+```text
+ws://localhost:8000/ws/terminal
+```
+
 ## Local Development Without Docker
 
 Backend:
@@ -97,3 +105,5 @@ npm run dev
 
 - The ADS-B Tracker and V/UHF Monitor pages are placeholders.
 - Docker containers report stats from inside their runtime environment. For direct host metrics, run the backend on the host or add host mounts and permissions appropriate for your deployment.
+- Security warning: the browser terminal is an interactive shell. Do not expose it publicly without authentication, authorization, HTTPS, and strict network controls.
+- The backend Docker image creates and runs as the non-root `appuser`; the terminal shell inherits that unprivileged user.

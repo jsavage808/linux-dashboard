@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Activity,
   Bot,
   Cpu,
@@ -12,9 +13,14 @@ import {
   TerminalSquare,
   Wifi,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import { useEffect, useMemo, useRef, useState } from "react";
+import "@xterm/xterm/css/xterm.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`;
+const API_BASE = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE;
+const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
@@ -193,6 +199,109 @@ function PlaceholderPage({ title, icon: Icon, detail }) {
   );
 }
 
+function TerminalPage() {
+  const terminalRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (!terminalRef.current) return undefined;
+
+    const terminal = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+      fontSize: 14,
+      theme: {
+        background: "#07110f",
+        foreground: "#dfffee",
+        cursor: "#a3e635",
+        selectionBackground: "#155e75",
+        black: "#020617",
+        brightBlack: "#475569",
+        red: "#f87171",
+        brightRed: "#fecaca",
+        green: "#86efac",
+        brightGreen: "#bbf7d0",
+        yellow: "#fde047",
+        brightYellow: "#fef08a",
+        blue: "#38bdf8",
+        brightBlue: "#7dd3fc",
+        magenta: "#c084fc",
+        brightMagenta: "#e9d5ff",
+        cyan: "#5eead4",
+        brightCyan: "#99f6e4",
+        white: "#e2e8f0",
+        brightWhite: "#f8fafc",
+      },
+    });
+    const fitAddon = new FitAddon();
+    const socket = new WebSocket(`${WS_BASE}/ws/terminal`);
+
+    terminal.loadAddon(fitAddon);
+    terminal.open(terminalRef.current);
+
+    const sendResize = () => {
+      fitAddon.fit();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            type: "resize",
+            cols: terminal.cols,
+            rows: terminal.rows,
+          })
+        );
+      }
+    };
+
+    socket.addEventListener("open", () => {
+      setConnected(true);
+      terminal.writeln("Connected to backend shell.");
+      sendResize();
+    });
+
+    socket.addEventListener("message", (event) => {
+      terminal.write(event.data);
+    });
+
+    socket.addEventListener("close", () => {
+      setConnected(false);
+      terminal.writeln("\r\nConnection closed.");
+    });
+
+    socket.addEventListener("error", () => {
+      terminal.writeln("\r\nTerminal WebSocket error.");
+    });
+
+    const dataDisposable = terminal.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+
+    const resizeObserver = new ResizeObserver(sendResize);
+    resizeObserver.observe(terminalRef.current);
+    window.setTimeout(sendResize, 0);
+
+    return () => {
+      resizeObserver.disconnect();
+      dataDisposable.dispose();
+      socket.close();
+      terminal.dispose();
+    };
+  }, []);
+
+  return (
+    <section className="terminal-panel">
+      <div className="terminal-warning">
+        <AlertTriangle size={17} />
+        Do not expose this terminal publicly without strong access controls.
+        <span className={connected ? "terminal-status online" : "terminal-status"}>{connected ? "Connected" : "Offline"}</span>
+      </div>
+      <div ref={terminalRef} className="terminal-host" />
+    </section>
+  );
+}
+
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
   const activeItem = navItems.find((item) => item.id === activePage) ?? navItems[0];
@@ -200,7 +309,7 @@ function App() {
   const pages = {
     dashboard: <DashboardPage />,
     chat: <PlaceholderPage title="AI Chat" icon={Bot} detail="Chat interface shell reserved for future model integration." />,
-    terminal: <PlaceholderPage title="Terminal" icon={TerminalSquare} detail="Remote terminal controls will be added after auth and command policy are defined." />,
+    terminal: <TerminalPage />,
     adsb: <PlaceholderPage title="ADS-B Tracker" icon={Satellite} detail="Placeholder for aircraft tracking, receivers, and map overlays." />,
     vuhf: <PlaceholderPage title="V/UHF Monitor" icon={Radio} detail="Placeholder for VHF and UHF monitoring workflows." />,
     settings: <PlaceholderPage title="Settings" icon={Settings} detail="Configuration controls for refresh cadence, node labels, and integrations." />,
