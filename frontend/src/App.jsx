@@ -36,7 +36,7 @@ const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "chat", label: "AI Chat", icon: Bot },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
-  { id: "adsb", label: "ADS-B Tracker", icon: Satellite },
+  { id: "adsb", label: "ADS-B", icon: Satellite },
   { id: "vuhf", label: "V/UHF Monitor", icon: Radio },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -119,16 +119,16 @@ function DashboardPage() {
   }
 
   return (
-    <div className="dashboard-grid">
+    <div className="dashboard-grid mission-grid">
       <section className="command-strip">
         <div>
-          <p className="eyebrow">Node</p>
+          <p className="eyebrow">Mission Node</p>
           <h1>{stats.hostname}</h1>
           <span>{stats.platform}</span>
         </div>
         <div className="status-pill">
           <Activity size={16} />
-          Live
+          Systems nominal
         </div>
       </section>
 
@@ -147,6 +147,12 @@ function DashboardPage() {
         percent={stats.memory.percent}
       />
       <MetricCard
+        icon={Activity}
+        label="GPU"
+        value="Pending"
+        detail="GPU telemetry adapter not configured"
+      />
+      <MetricCard
         icon={HardDrive}
         label="Disk"
         value={`${stats.disk.percent.toFixed(1)}%`}
@@ -159,6 +165,31 @@ function DashboardPage() {
         value={stats.uptime.display}
         detail={`Booted ${new Date(stats.uptime.boot_time).toLocaleString()}`}
       />
+
+      <section className="wide-panel service-panel">
+        <div className="section-title">
+          <Activity size={19} />
+          Service Matrix
+        </div>
+        <div className="service-grid">
+          <div className="service-tile online">
+            <span>Backend API</span>
+            <strong>Online</strong>
+          </div>
+          <div className="service-tile online">
+            <span>System Telemetry</span>
+            <strong>Streaming</strong>
+          </div>
+          <div className="service-tile standby">
+            <span>GPU Telemetry</span>
+            <strong>Pending</strong>
+          </div>
+          <div className="service-tile standby">
+            <span>SDR Bus</span>
+            <strong>Standby</strong>
+          </div>
+        </div>
+      </section>
 
       <section className="wide-panel">
         <div className="section-title">
@@ -193,6 +224,31 @@ function DashboardPage() {
           <span>1 min: {stats.cpu.load_average.one}</span>
           <span>5 min: {stats.cpu.load_average.five}</span>
           <span>15 min: {stats.cpu.load_average.fifteen}</span>
+        </div>
+      </section>
+
+      <section className="radar-panel">
+        <div className="section-title">
+          <Satellite size={19} />
+          Radar Preview
+        </div>
+        <div className="radar-scope">
+          <span className="radar-sweep" />
+          <i style={{ left: "68%", top: "33%" }} />
+          <i style={{ left: "42%", top: "61%" }} />
+          <i style={{ left: "56%", top: "48%" }} />
+        </div>
+      </section>
+
+      <section className="spectrum-panel">
+        <div className="section-title">
+          <Radio size={19} />
+          Radio Spectrum
+        </div>
+        <div className="spectrum-bars">
+          {Array.from({ length: 34 }, (_, index) => (
+            <span key={index} style={{ height: `${18 + ((index * 17) % 58)}%` }} />
+          ))}
         </div>
       </section>
     </div>
@@ -258,7 +314,7 @@ function MarkdownMessage({ content }) {
   );
 }
 
-function AiChatPage() {
+function AiChatPage({ onModelChange }) {
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem("linux-dashboard-chat-model") || ""
@@ -348,8 +404,9 @@ function AiChatPage() {
   useEffect(() => {
     if (selectedModel) {
       localStorage.setItem("linux-dashboard-chat-model", selectedModel);
+      onModelChange?.(selectedModel);
     }
-  }, [selectedModel]);
+  }, [onModelChange, selectedModel]);
 
   useEffect(() => {
     if (activeChatId) {
@@ -946,13 +1003,89 @@ function TerminalPage() {
   );
 }
 
+function TopStatusBar({ activeLabel, selectedModel }) {
+  const [serverName, setServerName] = useState("Node");
+  const [ollamaStatus, setOllamaStatus] = useState("Checking");
+  const [localTime, setLocalTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLocalTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadStatus() {
+      try {
+        const [systemResponse, modelResponse] = await Promise.all([
+          fetch(`${API_BASE}/api/system/stats`),
+          fetch(`${API_BASE}/api/models`),
+        ]);
+
+        if (!ignore && systemResponse.ok) {
+          const systemData = await systemResponse.json();
+          setServerName(systemData.hostname || "Node");
+        }
+
+        if (!ignore) {
+          setOllamaStatus(modelResponse.ok ? "Online" : "Offline");
+        }
+      } catch {
+        if (!ignore) setOllamaStatus("Offline");
+      }
+    }
+
+    loadStatus();
+    const interval = window.setInterval(loadStatus, 10000);
+    return () => {
+      ignore = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <header className="topbar">
+      <div className="topbar-title">
+        <span className="eyebrow">Console</span>
+        <h2>{activeLabel}</h2>
+      </div>
+      <div className="status-grid">
+        <div className="status-cell">
+          <span>Server</span>
+          <strong>{serverName}</strong>
+        </div>
+        <div className={ollamaStatus === "Online" ? "status-cell success" : "status-cell danger"}>
+          <span>Ollama</span>
+          <strong>{ollamaStatus}</strong>
+        </div>
+        <div className="status-cell">
+          <span>Model</span>
+          <strong>{selectedModel || "Unselected"}</strong>
+        </div>
+        <div className="status-cell standby">
+          <span>GPU</span>
+          <strong>Pending</strong>
+        </div>
+        <div className="status-cell">
+          <span>Local</span>
+          <strong>{localTime.toLocaleTimeString()}</strong>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
+  const [selectedModelStatus, setSelectedModelStatus] = useState(
+    () => localStorage.getItem("linux-dashboard-chat-model") || ""
+  );
   const activeItem = navItems.find((item) => item.id === activePage) ?? navItems[0];
 
   const pages = {
     dashboard: <DashboardPage />,
-    chat: <AiChatPage />,
+    chat: <AiChatPage onModelChange={setSelectedModelStatus} />,
     terminal: <TerminalPage />,
     adsb: <AdsbPage />,
     vuhf: <PlaceholderPage title="V/UHF Monitor" icon={Radio} detail="Placeholder for VHF and UHF monitoring workflows." />,
@@ -963,10 +1096,10 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">LD</span>
+          <span className="brand-mark">LC</span>
           <div>
-            <strong>Linux Dash</strong>
-            <small>Tactical Ops Console</small>
+            <strong>Local Command</strong>
+            <small>AI / SDR Ops</small>
           </div>
         </div>
         <nav>
@@ -987,13 +1120,7 @@ function App() {
         </nav>
       </aside>
       <main className="main">
-        <header className="topbar">
-          <div>
-            <span className="eyebrow">Console</span>
-            <h2>{activeItem.label}</h2>
-          </div>
-          <span className="clock">{new Date().toLocaleDateString()}</span>
-        </header>
+        <TopStatusBar activeLabel={activeItem.label} selectedModel={selectedModelStatus} />
         {pages[activePage]}
       </main>
     </div>

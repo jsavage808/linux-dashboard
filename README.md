@@ -208,6 +208,12 @@ data/chats/*.json
 
 The frontend may remember the selected model and active chat id in browser storage, but the actual conversation history lives on disk.
 
+## UI System
+
+The frontend uses a custom dark command-center design system defined in `frontend/src/styles.css`. Core colors are exposed as CSS variables for the near-black background, glass panels, panel borders, primary and muted text, teal accent, amber secondary accent, danger, and success states.
+
+The interface is designed around layered glass panels, subtle radar/grid texture, thin glowing borders, active navigation indicators, compact status cells, and dense mission-control panels for local AI, ADS-B, SDR, terminal, and system telemetry workflows.
+
 ## ADS-B Setup
 
 The backend tries common local readsb/dump1090 URLs through Docker's host gateway:
