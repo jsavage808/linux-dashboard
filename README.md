@@ -115,7 +115,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 Pull the preferred Qwen model:
 
 ```bash
-ollama pull qwen3:14b
+ollama pull qwen3:4b
 ```
 
 Optional smaller/larger Qwen models:
@@ -124,6 +124,8 @@ Optional smaller/larger Qwen models:
 ollama pull qwen3:8b
 ollama pull qwen3:32b
 ```
+
+Assistant responses show a small performance strip with response time, tokens per second when Ollama reports it, and the selected model.
 
 Start Ollama. For Docker Compose, Ollama must listen beyond only `localhost` so the backend container can reach it:
 
@@ -189,7 +191,7 @@ Each chat file includes:
 {
   "id": "uuid",
   "title": "First user message title",
-  "model": "qwen3:14b",
+  "model": "qwen3:4b",
   "created_at": "timestamp",
   "updated_at": "timestamp",
   "messages": []

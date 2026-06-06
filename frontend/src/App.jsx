@@ -284,10 +284,14 @@ function AiChatPage() {
         if (ignore) return;
 
         const modelNames = data.models.map((model) => model.name);
+        const completionModelNames = data.models
+          .filter((model) => model.capabilities?.includes("completion") || model.capabilities?.includes("thinking"))
+          .map((model) => model.name);
         setModels(data.models);
         setSelectedModel((current) => {
-          if (current && modelNames.includes(current)) return current;
-          return data.default_model || "";
+          if (current && completionModelNames.includes(current)) return current;
+          if (modelNames.includes("qwen3:4b")) return "qwen3:4b";
+          return data.default_model || completionModelNames[0] || "";
         });
         setError("");
       } catch (err) {
@@ -399,7 +403,7 @@ function AiChatPage() {
     const content = draft.trim();
     if (!content || streaming) return;
     if (!selectedModel) {
-      setError("No Ollama model is available. Pull a model first, such as qwen3:14b.");
+      setError("No Ollama model is available. Pull a model first, such as qwen3:4b.");
       return;
     }
 
@@ -410,6 +414,7 @@ function AiChatPage() {
     const nextMessages = [...messages, { role: "user", content }];
     setMessages([...nextMessages, { role: "assistant", content: "" }]);
     let assistantContent = "";
+    let assistantMetrics = null;
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -425,21 +430,48 @@ function AiChatPage() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === "error") {
+            throw new Error(event.message);
+          }
+          if (event.type === "metrics") {
+            assistantMetrics = event.metrics;
+            setMessages((current) => {
+              const updated = [...current];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = { ...last, metrics: assistantMetrics };
+              return updated;
+            });
+            continue;
+          }
+          if (event.type !== "content") continue;
+          const chunk = event.content || "";
+          assistantContent += chunk;
+          setMessages((current) => {
+            const updated = [...current];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, content: `${last.content}${chunk}` };
+            return updated;
+          });
+        }
+
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        assistantContent += chunk;
-        setMessages((current) => {
-          const updated = [...current];
-          const last = updated[updated.length - 1];
-          updated[updated.length - 1] = { ...last, content: `${last.content}${chunk}` };
-          return updated;
-        });
       }
 
-      const finalMessages = [...nextMessages, { role: "assistant", content: assistantContent }];
+      const finalMessages = [
+        ...nextMessages,
+        { role: "assistant", content: assistantContent, metrics: assistantMetrics },
+      ];
       setMessages(finalMessages);
       await saveChat(finalMessages, selectedModel);
     } catch (err) {
@@ -579,6 +611,13 @@ function AiChatPage() {
                 <div className="markdown-body">
                   {message.content ? <MarkdownMessage content={message.content} /> : <span className="stream-caret">Streaming...</span>}
                 </div>
+                {message.role === "assistant" && (
+                  <div className="message-metrics">
+                    <span>Time: {message.metrics?.response_time_seconds != null ? `${message.metrics.response_time_seconds}s` : streaming && index === messages.length - 1 ? "streaming" : "-"}</span>
+                    <span>TPS: {message.metrics?.tokens_per_second != null ? message.metrics.tokens_per_second : "-"}</span>
+                    <span>Model: {message.metrics?.model || selectedModel || "-"}</span>
+                  </div>
+                )}
               </article>
             ))
           )}

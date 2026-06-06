@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -36,14 +37,16 @@ async def list_models() -> list[dict[str, Any]]:
             "name": model.get("name"),
             "modified_at": model.get("modified_at"),
             "size": model.get("size"),
+            "capabilities": model.get("capabilities", []),
         }
         for model in models
         if isinstance(model, dict) and model.get("name")
     ]
 
 
-async def stream_chat(model: str, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+async def stream_chat(model: str, messages: list[dict[str, str]]) -> AsyncIterator[dict[str, Any]]:
     payload = {"model": model, "messages": messages, "stream": True}
+    started_at = time.perf_counter()
 
     try:
         async with httpx.AsyncClient(timeout=None) as client:
@@ -62,13 +65,36 @@ async def stream_chat(model: str, messages: list[dict[str, str]]) -> AsyncIterat
                         continue
 
                     if chunk.get("error"):
-                        yield f"\n\n[Ollama error: {chunk['error']}]\n"
+                        yield {"type": "error", "message": f"Ollama error: {chunk['error']}"}
                         return
 
                     content = chunk.get("message", {}).get("content")
                     if content:
-                        yield content
+                        yield {"type": "content", "content": content}
                     if chunk.get("done"):
+                        elapsed = time.perf_counter() - started_at
+                        eval_count = chunk.get("eval_count")
+                        eval_duration = chunk.get("eval_duration")
+                        tokens_per_second = None
+                        if eval_count and eval_duration:
+                            eval_seconds = eval_duration / 1_000_000_000
+                            if eval_seconds > 0:
+                                tokens_per_second = round(eval_count / eval_seconds, 2)
+
+                        total_duration = chunk.get("total_duration")
+                        response_time = (
+                            round(total_duration / 1_000_000_000, 2)
+                            if total_duration
+                            else round(elapsed, 2)
+                        )
+                        yield {
+                            "type": "metrics",
+                            "metrics": {
+                                "response_time_seconds": response_time,
+                                "tokens_per_second": tokens_per_second,
+                                "model": model,
+                            },
+                        }
                         return
     except httpx.HTTPError as exc:
-        yield f"\n\n[Ollama connection error: {exc}]\n"
+        yield {"type": "error", "message": f"Ollama connection error: {exc}"}

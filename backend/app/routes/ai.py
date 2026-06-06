@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,7 @@ router = APIRouter()
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str
+    metrics: dict | None = None
 
 
 class ChatRequest(BaseModel):
@@ -40,7 +42,16 @@ async def read_models() -> dict:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     names = [model["name"] for model in models]
-    default_model = "qwen3:14b" if "qwen3:14b" in names else (names[0] if names else None)
+    completion_models = [
+        model["name"]
+        for model in models
+        if "completion" in model.get("capabilities", []) or "thinking" in model.get("capabilities", [])
+    ]
+    preferred_models = ["qwen3:4b", "qwen3:14b", "qwen3:8b"]
+    default_model = next(
+        (model for model in preferred_models if model in names),
+        completion_models[0] if completion_models else (names[0] if names else None),
+    )
     return {"models": models, "default_model": default_model}
 
 
@@ -59,13 +70,13 @@ def read_chat(chat_id: str) -> dict:
 
 @router.post("/chats")
 def create_stored_chat(request: StoredChatRequest) -> dict:
-    messages = [message.dict() for message in request.messages]
+    messages = [message.dict(exclude_none=True) for message in request.messages]
     return store_create_chat(request.model, messages, request.title)
 
 
 @router.put("/chats/{chat_id}")
 def update_stored_chat(chat_id: str, request: StoredChatRequest) -> dict:
-    messages = [message.dict() for message in request.messages]
+    messages = [message.dict(exclude_none=True) for message in request.messages]
     chat = store_update_chat(chat_id, request.model, messages, request.title)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -90,8 +101,13 @@ async def create_chat(request: ChatRequest) -> StreamingResponse:
     if request.model not in model_names:
         raise HTTPException(status_code=404, detail=f"Model not found: {request.model}")
 
-    messages = [message.dict() for message in request.messages]
+    messages = [{"role": message.role, "content": message.content} for message in request.messages]
+
+    async def event_stream():
+        async for event in stream_chat(request.model, messages):
+            yield f"{json.dumps(event)}\n"
+
     return StreamingResponse(
-        stream_chat(request.model, messages),
-        media_type="text/plain; charset=utf-8",
+        event_stream(),
+        media_type="application/x-ndjson",
     )
